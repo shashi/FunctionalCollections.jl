@@ -1,3 +1,4 @@
+
 # Dense Bitmapped Tries
 # =====================
 
@@ -133,23 +134,19 @@ immutable PersistentVector{T} <: AbstractArray{T,1}
     tail::Vector{T}
     length::Int
 
-    PersistentVector(trie::DenseBitmappedTrie, tail::Vector{T}, length::Int) =
+    PersistentVector(trie::DenseBitmappedTrie, tail, length::Int) =
         new(trie, tail, length)
     PersistentVector() = new(DenseLeaf{Vector{T}}(), T[], 0)
-end
-PersistentVector() = PersistentVector{Any}()
-
-function PersistentVector{T}(arr::Vector{T})
-    if length(arr) <= trielen
-        PersistentVector{T}(DenseLeaf{Vector{T}}(), arr, length(arr))
-    else
-        v = PersistentVector{T}()
-        for el in arr
-            v = append(v, el)
+    function PersistentVector(arr)
+        if length(arr) <= trielen
+            new(DenseLeaf{Vector{T}}(), arr, length(arr))
+        else
+            append(new(DenseLeaf{Vector{T}}(), T[], 0), arr)
         end
-        v
     end
 end
+PersistentVector() = PersistentVector{Any}()
+PersistentVector(itr) = PersistentVector{eltype(itr)}(itr)
 
 mask(i::Int) = ((i - 1) & (trielen - 1)) + 1
 
@@ -178,7 +175,7 @@ end
 
 peek(v::PersistentVector) = v[end]
 
-function append{T}(v::PersistentVector{T}, el)
+function append{T}(v::PersistentVector{T}, el::T)
     if length(v.tail) < trielen
         newtail = copy_to_len(v.tail, 1 + length(v.tail))
         newtail[end] = el
@@ -187,7 +184,8 @@ function append{T}(v::PersistentVector{T}, el)
         PersistentVector{T}(append(v.trie, v.tail), T[el], 1 + v.length)
     end
 end
-push(v::PersistentVector, el) = append(v, el)
+append{T}(v::PersistentVector{T}, itr) = foldl(append, v, itr)
+push{T}(v::PersistentVector{T}, el::T) = append(v, el)
 
 function assoc{T}(v::PersistentVector{T}, i::Int, el)
     boundscheck!(v, i)
@@ -219,6 +217,7 @@ end
 
 Base.start{T}(v::PersistentVector{T}) = ItrState(1, v.length <= 32 ? v.tail : v.trie[1])
 Base.done{T}(v::PersistentVector{T}, state::ItrState{T}) = state.index > v.length
+
 function Base.next{T}(v::PersistentVector{T}, state::ItrState{T})
     i, leaf = state.index, state.leaf
     m = mask(i)
@@ -231,9 +230,16 @@ function Base.next{T}(v::PersistentVector{T}, state::ItrState{T})
 end
 
 function Base.map{T}(f::Function, pv::PersistentVector{T})
-    v = PersistentVector{T}()
+    first =  true
+    local v
     for el in pv
-        v = append(v, f(el))
+        if first
+            val = f(el)
+            v = PersistentVector{typeof(val)}([val])
+            first = false
+        else
+            v = append(v, f(el))
+        end
     end
     v
 end
